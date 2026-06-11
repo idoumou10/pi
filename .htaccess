@@ -1,0 +1,5 @@
+# Empêcher l'exécution de tout script dans ce dossier (sécurité upload)
+php_flag engine off
+<FilesMatch "\.(php|phtml|php3|php4|php5|pl|py|cgi|sh)$">
+    Deny from all
+</FilesMatch>

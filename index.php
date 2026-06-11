@@ -1,165 +1,144 @@
 <?php
-require_once __DIR__ . '/config.php';
-require_once __DIR__ . '/utilisateurs.php';
-require_once __DIR__ . '/produits.php';
-require_once __DIR__ . '/categories.php';
-require_once __DIR__ . '/commandes.php';
-require_once __DIR__ . '/includes/favoris_lib.php';
+$page_titre = 'Tableau de bord';
+$active = 'dashboard';
+include __DIR__ . '/../includes/admin_header.php';
 
-$produits_une   = getTousProduits($conn);
-$vedette        = array_slice($produits_une, 0, 8);
-$favoris_ids    = estConnecte() ? getIdsFavoris($conn, $_SESSION['id_utilisateur']) : [];
-$seuil_nouveau  = getSeuilNouveau($conn);
+// Stats globales
+$nb_produits     = (int)$conn->query("SELECT COUNT(*) AS n FROM produit")->fetch_assoc()['n'];
+$nb_commandes    = (int)$conn->query("SELECT COUNT(*) AS n FROM commandes")->fetch_assoc()['n'];
+$nb_utilisateurs = (int)$conn->query("SELECT COUNT(*) AS n FROM utilisateurs WHERE role='client'")->fetch_assoc()['n'];
+$nb_attente      = (int)$conn->query("SELECT COUNT(*) AS n FROM commandes WHERE statut='en_attente'")->fetch_assoc()['n'];
+$ca_total        = (float)($conn->query("SELECT SUM(total_MRU) AS s FROM commandes WHERE statut IN ('livrée','expédiée','en_cours','confirmée')")->fetch_assoc()['s'] ?? 0);
+$nb_rupture      = (int)$conn->query("SELECT COUNT(*) AS n FROM produit WHERE stock_disponible <= seuil_alerte_stock")->fetch_assoc()['n'];
 
-$categories_sidebar = getToutesCategories($conn);
-$categories_pop     = getCategoriesPopulaires($conn, 8);
+// Dernières commandes
+$recent_cmds = $conn->query(
+    "SELECT c.*, u.nom, u.prenom FROM commandes c
+     LEFT JOIN utilisateurs u ON c.id_utilisateur = u.id_utilisateur
+     ORDER BY c.date_commande DESC LIMIT 5"
+)->fetch_all(MYSQLI_ASSOC);
 
-$nb_produits   = (int)$conn->query("SELECT COUNT(*) AS n FROM produit WHERE statut = 'disponible'")->fetch_assoc()['n'];
-$nb_categories = (int)$conn->query("SELECT COUNT(*) AS n FROM categories WHERE statut = 'actif'")->fetch_assoc()['n'];
-$nb_marques    = (int)$conn->query("SELECT COUNT(*) AS n FROM marques")->fetch_assoc()['n'];
-$nb_clients    = (int)$conn->query("SELECT COUNT(*) AS n FROM utilisateurs WHERE role = 'client'")->fetch_assoc()['n'];
-
-// Offre du jour
-$offre_produit_id = (int)getParametre($conn, 'offre_du_jour_produit', '0');
-$offre_fin        = getParametre($conn, 'offre_du_jour_fin', '');
-$offre_produit    = null;
-if ($offre_produit_id > 0 && $offre_fin !== '' && strtotime($offre_fin) > time()) {
-    $offre_produit = getProduitParId($conn, $offre_produit_id);
-    if ($offre_produit) {
-        $offre_produit['en_promo'] = true;
-    }
-}
-
-$page_titre  = 'Accueil';
-$page_active = 'accueil';
-include __DIR__ . '/includes/header.php';
+// Produits en rupture
+$rupture_produits = $conn->query(
+    "SELECT id_produit, nom_produit, stock_disponible, seuil_alerte_stock
+     FROM produit
+     WHERE stock_disponible <= seuil_alerte_stock
+     ORDER BY stock_disponible ASC
+     LIMIT 5"
+)->fetch_all(MYSQLI_ASSOC);
 ?>
 
-<main>
-<!-- HERO -->
-<section class="hero">
-    <h1>Vos composants<br><span>électroniques</span> en ligne</h1>
-    <p>Arduino, Raspberry Pi, capteurs, résistances, condensateurs... Tout pour vos projets électroniques livrés en Mauritanie.</p>
-    <div class="hero-btns">
-        <a href="catalogue.php" class="btn-primary"><i class="fas fa-th"></i> Voir le catalogue</a>
-        <?php if (!estConnecte()): ?>
-            <a href="login.php" class="btn-secondary"><i class="fas fa-sign-in-alt"></i> Se connecter</a>
-        <?php endif; ?>
-    </div>
-</section>
+<div class="page-header">
+    <h1><i class="fas fa-tachometer-alt"></i> Tableau de bord</h1>
+    <span style="color:var(--gris);font-size:13px">
+        Bienvenue <?= e($_SESSION['prenom']) ?> 👋
+    </span>
+</div>
 
-<!-- BANDEAU STATISTIQUES -->
-<div class="stats-bar">
-    <div class="stat-item">
-        <i class="fas fa-microchip"></i>
-        <div><strong><?= $nb_produits ?>+</strong><span>Produits</span></div>
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-icon"><i class="fas fa-box"></i></div>
+        <div>
+            <div class="stat-num"><?= number_format($nb_produits) ?></div>
+            <div class="stat-label">Produits</div>
+        </div>
     </div>
-    <div class="stat-item">
-        <i class="fas fa-layer-group"></i>
-        <div><strong><?= $nb_categories ?></strong><span>Catégories</span></div>
+    <div class="stat-card green">
+        <div class="stat-icon"><i class="fas fa-shopping-bag"></i></div>
+        <div>
+            <div class="stat-num"><?= number_format($nb_commandes) ?></div>
+            <div class="stat-label">Commandes totales</div>
+        </div>
     </div>
-    <div class="stat-item">
-        <i class="fas fa-tags"></i>
-        <div><strong><?= $nb_marques ?></strong><span>Marques</span></div>
+    <div class="stat-card orange">
+        <div class="stat-icon"><i class="fas fa-clock"></i></div>
+        <div>
+            <div class="stat-num"><?= number_format($nb_attente) ?></div>
+            <div class="stat-label">En attente</div>
+        </div>
     </div>
-    <div class="stat-item">
-        <i class="fas fa-users"></i>
-        <div><strong><?= $nb_clients ?>+</strong><span>Clients satisfaits</span></div>
+    <div class="stat-card purple">
+        <div class="stat-icon"><i class="fas fa-users"></i></div>
+        <div>
+            <div class="stat-num"><?= number_format($nb_utilisateurs) ?></div>
+            <div class="stat-label">Clients</div>
+        </div>
+    </div>
+    <div class="stat-card green">
+        <div class="stat-icon"><i class="fas fa-coins"></i></div>
+        <div>
+            <div class="stat-num"><?= number_format($ca_total, 0) ?> <small style="font-size:12px">MRU</small></div>
+            <div class="stat-label">Chiffre d'affaires</div>
+        </div>
+    </div>
+    <div class="stat-card orange">
+        <div class="stat-icon"><i class="fas fa-exclamation-triangle"></i></div>
+        <div>
+            <div class="stat-num"><?= number_format($nb_rupture) ?></div>
+            <div class="stat-label">Stock faible</div>
+        </div>
     </div>
 </div>
 
-<div class="section home-layout">
-    <!-- SIDEBAR CATEGORIES -->
-    <aside class="cat-sidebar">
-        <h3><i class="fas fa-bars"></i> Catégories</h3>
-        <ul>
-            <?php foreach ($categories_sidebar as $c): ?>
-                <li>
-                    <a href="catalogue.php?categorie=<?= (int)$c['id_categorie'] ?>">
-                        <i class="fas <?= getIconeCategorie($c['NOM']) ?>"></i> <?= e($c['NOM']) ?>
-                    </a>
-                </li>
-            <?php endforeach; ?>
-        </ul>
-    </aside>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px" class="dashboard-2cols">
+    <!-- Dernières commandes -->
+    <div class="table-box">
+        <div class="table-header">
+            <h3>Dernières commandes</h3>
+            <a href="commandes.php" class="btn-mini btn-view">Voir tout</a>
+        </div>
+        <div class="table-wrap">
+            <table class="admin-table">
+                <thead><tr><th>#</th><th>Client</th><th>Total</th><th>Statut</th></tr></thead>
+                <tbody>
+                    <?php if (empty($recent_cmds)): ?>
+                        <tr><td colspan="4" style="text-align:center;color:var(--gris);padding:24px">Aucune commande</td></tr>
+                    <?php else: foreach ($recent_cmds as $c): ?>
+                    <tr>
+                        <td>#<?= (int)$c['id_commande'] ?></td>
+                        <td><?= e(($c['prenom'] ?? '') . ' ' . ($c['nom'] ?? '')) ?></td>
+                        <td><strong><?= number_format($c['total_MRU'], 2) ?> MRU</strong></td>
+                        <td><span class="badge badge-<?= e($c['statut']) ?>"><?= e($c['statut']) ?></span></td>
+                    </tr>
+                    <?php endforeach; endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
 
-    <div class="home-main">
-        <?php if ($offre_produit): ?>
-        <!-- OFFRE DU JOUR -->
-        <section class="offre-jour">
-            <div class="offre-jour-info">
-                <span class="offre-jour-tag"><i class="fas fa-bolt"></i> Offre du jour</span>
-                <h3><?= e($offre_produit['nom_produit']) ?></h3>
-                <p><?= e(mb_strimwidth($offre_produit['description'] ?? '', 0, 140, '...')) ?></p>
-                <div class="offre-jour-prix"><?= number_format($offre_produit['prix_unitaire_MRU'], 2) ?> <small>MRU</small></div>
-                <a href="catalogue.php?categorie=<?= (int)$offre_produit['id_categorie'] ?>" class="btn-primary">
-                    <i class="fas fa-shopping-cart"></i> En profiter
-                </a>
-            </div>
-            <div class="offre-jour-countdown" data-fin="<?= e(str_replace(' ', 'T', $offre_fin)) ?>">
-                <div class="countdown-item"><span class="cd-val" data-unit="jours">00</span><span class="cd-label">Jours</span></div>
-                <div class="countdown-item"><span class="cd-val" data-unit="heures">00</span><span class="cd-label">Heures</span></div>
-                <div class="countdown-item"><span class="cd-val" data-unit="minutes">00</span><span class="cd-label">Min</span></div>
-                <div class="countdown-item"><span class="cd-val" data-unit="secondes">00</span><span class="cd-label">Sec</span></div>
-            </div>
-        </section>
-        <?php endif; ?>
-
-        <!-- CATEGORIES POPULAIRES -->
-        <?php if ($categories_pop): ?>
-        <section>
-            <h2 class="section-title">Catégories populaires</h2>
-            <div class="categories-pop-grid">
-                <?php foreach ($categories_pop as $c): ?>
-                    <a href="catalogue.php?categorie=<?= (int)$c['id_categorie'] ?>" class="categorie-pop-card">
-                        <i class="fas <?= getIconeCategorie($c['NOM']) ?>"></i>
-                        <span class="cat-pop-nom"><?= e($c['NOM']) ?></span>
-                        <span class="cat-pop-nb"><?= (int)$c['nb_produits'] ?> produit<?= $c['nb_produits'] > 1 ? 's' : '' ?></span>
-                    </a>
-                <?php endforeach; ?>
-            </div>
-        </section>
-        <?php endif; ?>
-
-        <!-- PRODUITS EN VEDETTE -->
-        <section>
-            <h2 class="section-title">Produits populaires</h2>
-            <div class="produits-grid">
-                <?php foreach ($vedette as $p):
-                    $is_fav = in_array($p['id_produit'], $favoris_ids);
-                    include __DIR__ . '/includes/product_card.php';
-                endforeach; ?>
-            </div>
-            <div style="text-align:center;margin-top:24px">
-                <a href="catalogue.php" class="btn-primary">Voir tous les produits <i class="fas fa-arrow-right"></i></a>
-            </div>
-        </section>
+    <!-- Stock faible -->
+    <div class="table-box">
+        <div class="table-header">
+            <h3>Stock à reapprovisionner</h3>
+            <a href="produits.php" class="btn-mini btn-view">Voir tout</a>
+        </div>
+        <div class="table-wrap">
+            <table class="admin-table">
+                <thead><tr><th>Produit</th><th>Stock</th><th>Seuil</th></tr></thead>
+                <tbody>
+                    <?php if (empty($rupture_produits)): ?>
+                        <tr><td colspan="3" style="text-align:center;color:var(--gris);padding:24px">Stock OK 👍</td></tr>
+                    <?php else: foreach ($rupture_produits as $p): ?>
+                    <tr>
+                        <td><?= e($p['nom_produit']) ?></td>
+                        <td>
+                            <span class="badge <?= $p['stock_disponible']==0 ? 'badge-inactif' : 'badge-pct' ?>">
+                                <?= (int)$p['stock_disponible'] ?>
+                            </span>
+                        </td>
+                        <td><?= (int)$p['seuil_alerte_stock'] ?></td>
+                    </tr>
+                    <?php endforeach; endif; ?>
+                </tbody>
+            </table>
+        </div>
     </div>
 </div>
-</main>
 
-<?php if ($offre_produit): ?>
-<script>
-(function() {
-    var el = document.querySelector('.offre-jour-countdown');
-    if (!el) return;
-    var fin = new Date(el.dataset.fin).getTime();
-    function maj() {
-        var ecart = fin - Date.now();
-        if (ecart < 0) ecart = 0;
-        var jours    = Math.floor(ecart / (1000 * 60 * 60 * 24));
-        var heures   = Math.floor((ecart / (1000 * 60 * 60)) % 24);
-        var minutes  = Math.floor((ecart / (1000 * 60)) % 60);
-        var secondes = Math.floor((ecart / 1000) % 60);
-        el.querySelector('[data-unit="jours"]').textContent    = String(jours).padStart(2, '0');
-        el.querySelector('[data-unit="heures"]').textContent   = String(heures).padStart(2, '0');
-        el.querySelector('[data-unit="minutes"]').textContent  = String(minutes).padStart(2, '0');
-        el.querySelector('[data-unit="secondes"]').textContent = String(secondes).padStart(2, '0');
-    }
-    maj();
-    setInterval(maj, 1000);
-})();
-</script>
-<?php endif; ?>
+<style>
+@media (max-width: 1024px) {
+    .dashboard-2cols { grid-template-columns: 1fr !important; }
+}
+</style>
 
-<?php include __DIR__ . '/includes/footer.php'; ?>
+<?php include __DIR__ . '/../includes/admin_footer.php'; ?>
